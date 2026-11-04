@@ -121,6 +121,11 @@ export const DEFAULT_TIMEOUT_MS = 1000;
 
 export interface SendOptions {
   timeoutMs?: number;
+  /**
+   * Called right before the command is actually written. A command can wait in the queue
+   * (or for a late answer to drain) first, so this is the true start of the round trip.
+   */
+  onSent?: () => void;
 }
 
 export interface Elm327Options {
@@ -189,7 +194,7 @@ export class Elm327 {
 
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     // Promise-chain queue: each command starts only after the previous one settled.
-    const run = this.tail.then(() => this.execute(normalized, timeoutMs));
+    const run = this.tail.then(() => this.execute(normalized, timeoutMs, options.onSent));
     this.tail = run.catch(() => undefined);
     return run;
   }
@@ -237,13 +242,17 @@ export class Elm327 {
     return parseRpm(await this.send(this.rpmCommand, options));
   }
 
-  private async execute(command: string, timeoutMs: number): Promise<string[]> {
+  private async execute(
+    command: string,
+    timeoutMs: number,
+    onSent?: () => void,
+  ): Promise<string[]> {
     if (this.expectingLateAnswer) await this.drainLateAnswer();
     if (!this.transport.isConnected) {
       throw new DisconnectedError(`${command}: not connected`, command);
     }
 
-    const raw = await this.exchange(command, timeoutMs);
+    const raw = await this.exchange(command, timeoutMs, onSent);
     const lines = cleanLines(raw, command);
     const error = mapError(lines, command);
     if (error) {
@@ -254,7 +263,7 @@ export class Elm327 {
   }
 
   /** Write the command and resolve with the raw text before the `>` prompt. */
-  private exchange(command: string, timeoutMs: number): Promise<string> {
+  private exchange(command: string, timeoutMs: number, onSent?: () => void): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending !== request) return;
@@ -281,6 +290,7 @@ export class Elm327 {
       this.pending = request;
 
       this.log?.add('tx', command);
+      onSent?.();
       this.transport.write(`${command}\r`).catch((error: unknown) => {
         if (this.pending !== request) return;
         this.pending = null;

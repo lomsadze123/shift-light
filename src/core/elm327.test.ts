@@ -270,6 +270,28 @@ describe('send', () => {
     await expect(second).resolves.toEqual(['4100BE3EB811']);
   });
 
+  it('calls onSent when the command is really written, after any drain', async () => {
+    vi.useFakeTimers();
+    const transport = new FakeTransport();
+    const elm = new Elm327(transport, undefined, { drainMs: 500 });
+
+    const first = elm.send('010C', { timeoutMs: 100 });
+    const firstRejected = expect(first).rejects.toBeInstanceOf(TimeoutError);
+    await vi.advanceTimersByTimeAsync(100);
+    await firstRejected;
+
+    const writtenWhenSent: number[] = [];
+    const second = elm.send('ATE0', { onSent: () => writtenWhenSent.push(Date.now()) });
+    const askedAt = Date.now();
+    await vi.advanceTimersByTimeAsync(499);
+    expect(writtenWhenSent).toEqual([]); // still draining
+    await vi.advanceTimersByTimeAsync(1);
+    expect(writtenWhenSent).toEqual([askedAt + 500]);
+
+    transport.emit('OK\r\r>');
+    await second;
+  });
+
   it('stops waiting for a late answer after drainMs', async () => {
     vi.useFakeTimers();
     const transport = new FakeTransport();
