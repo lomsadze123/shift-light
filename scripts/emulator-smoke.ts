@@ -1,78 +1,39 @@
 /**
- * Phase 1 smoke test: talk to the ELM327 emulator over TCP and print the raw answers.
+ * Smoke test against the ELM327 emulator over TCP: initialize the adapter with the Elm327
+ * driver and print 20 RPM readings.
  *
  *   Terminal 1: elm -n 35000
- *   Terminal 2: npm run emu:smoke            (or: npm run emu:smoke -- <host> <port>)
+ *   Terminal 2: npm run emu:smoke                 (or: npm run emu:smoke -- [-v] [host] [port])
  *
- * The send-and-wait-for-'>' helper here is deliberately simple and temporary. The Elm327
- * driver (Phase 2) replaces it with a proper queue, error mapping and the command allowlist.
+ * -v prints the raw TX/RX traffic from the DebugLog as it happens.
  */
-import type { Transport } from '../src/core/transport';
+import { DebugLog, showControlChars } from '../src/core/debugLog';
+import { Elm327 } from '../src/core/elm327';
 import { TcpTransport } from '../src/transports/tcp';
 import { createNodeSocket } from '../src/transports/tcpNode';
 
-const host = process.argv[2] ?? 'localhost';
-const port = Number(process.argv[3] ?? 35000);
-
-// [command, timeout in ms]. ATZ resets the adapter and is slow on real hardware.
-const COMMANDS: [string, number][] = [
-  ['ATZ', 5000],
-  ['ATE0', 2000],
-  ['ATS0', 2000],
-  ['010C', 5000],
-];
-
-/** Make control characters visible: \r → ⏎, \n → ␊. */
-function visible(text: string): string {
-  return text.replace(/\r/g, '⏎').replace(/\n/g, '␊');
-}
+const args = process.argv.slice(2);
+const verbose = args.includes('-v') || args.includes('--verbose');
+const positional = args.filter((arg) => !arg.startsWith('-'));
+const host = positional[0] ?? 'localhost';
+const port = Number(positional[1] ?? 35000);
+const READINGS = 20;
 
 function describeError(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   // Node may report a refused connection as an AggregateError with an empty message.
   const code = (error as NodeJS.ErrnoException).code;
-  return error.message || code || error.name;
-}
-
-interface Answer {
-  text: string;
-  chunks: number;
-  ms: number;
-}
-
-/** Send one command and collect chunks until the '>' prompt arrives. */
-function sendAndWait(transport: Transport, command: string, timeoutMs: number): Promise<Answer> {
-  return new Promise((resolve, reject) => {
-    const start = performance.now();
-    let buffer = '';
-    let chunks = 0;
-
-    const unsubscribe = transport.onData((chunk) => {
-      buffer += chunk;
-      chunks++;
-      if (buffer.includes('>')) {
-        clearTimeout(timer);
-        unsubscribe();
-        resolve({ text: buffer, chunks, ms: performance.now() - start });
-      }
-    });
-
-    const timer = setTimeout(() => {
-      unsubscribe();
-      reject(new Error(`No '>' within ${timeoutMs} ms. Received so far: "${visible(buffer)}"`));
-    }, timeoutMs);
-
-    transport.write(`${command}\r`).catch((error: unknown) => {
-      clearTimeout(timer);
-      unsubscribe();
-      reject(error);
-    });
-  });
+  const text = error.message || code || '';
+  return text ? `${error.name}: ${text}` : error.name;
 }
 
 async function main(): Promise<void> {
-  const transport = new TcpTransport(host, port, createNodeSocket);
+  const log = new DebugLog();
+  if (verbose) {
+    log.subscribe((entry) => console.log(`    [${entry.dir}] ${showControlChars(entry.text)}`));
+  }
 
+  const transport = new TcpTransport(host, port, createNodeSocket);
   console.log(`Connecting to ${host}:${port} ...`);
   try {
     await transport.connect();
@@ -82,25 +43,38 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  console.log('Connected.\n');
+  console.log('Connected.');
 
-  transport.onClose((error) => {
-    if (error) console.error(`Connection closed: ${describeError(error)}`);
-  });
-
+  const elm = new Elm327(transport, log);
   try {
-    for (const [command, timeoutMs] of COMMANDS) {
-      console.log(`TX ${command}`);
-      const answer = await sendAndWait(transport, command, timeoutMs);
-      const chunkWord = answer.chunks === 1 ? 'chunk' : 'chunks';
-      console.log(
-        `RX "${visible(answer.text)}"  (${answer.ms.toFixed(0)} ms, ${answer.chunks} ${chunkWord})\n`,
-      );
+    console.log('Initializing ...');
+    await elm.init();
+    console.log(`Adapter: ${elm.version ?? 'unknown'}`);
+
+    const rpmCommand = await elm.detectFastRpm();
+    const note = rpmCommand === '010C' ? ' (010C1 not supported, fell back)' : ' (fast mode)';
+    console.log(`RPM command: ${rpmCommand}${note}\n`);
+
+    const start = performance.now();
+    for (let i = 1; i <= READINGS; i++) {
+      const sent = performance.now();
+      let result: string;
+      try {
+        const rpm = await elm.readRpm();
+        result = rpm === null ? 'no RPM in answer' : `${rpm.toFixed(0).padStart(5)} RPM`;
+      } catch (error) {
+        result = describeError(error);
+      }
+      const done = performance.now();
+      const at = `+${(done - start).toFixed(0).padStart(5)} ms`;
+      const roundTrip = `(${(done - sent).toFixed(0)} ms)`;
+      console.log(`${String(i).padStart(2)}  ${at}  ${result}  ${roundTrip}`);
     }
   } catch (error) {
     console.error(`Error: ${describeError(error)}`);
     process.exitCode = 1;
   } finally {
+    elm.dispose();
     await transport.disconnect();
   }
 }

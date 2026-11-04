@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# ELM327 emulator log (written when `elm` runs in this folder)
+elm.log
