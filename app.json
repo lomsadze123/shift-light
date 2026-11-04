@@ -8,7 +8,11 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bekalomsadze.shiftlight",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Connects to an OBD emulator on your local network during development."
+      }
     },
     "android": {
       "adaptiveIcon": {

@@ -36,7 +36,7 @@ export const ConnectionStatus = memo(function ConnectionStatus({
   }
 
   return (
-    <Text style={[styles.text, bad && styles.bad]} numberOfLines={2}>
+    <Text style={[styles.text, bad && styles.bad]} numberOfLines={bad ? 6 : 2}>
       {parts.join(' · ')}
       {bad && error ? `\n${error}` : ''}
     </Text>

@@ -48,6 +48,8 @@ export function ShiftLightScreen() {
             connection={shiftLight.connection}
             onConnect={shiftLight.connect}
             onDisconnect={shiftLight.disconnect}
+            settings={settings}
+            onSettingsChange={update}
           />
           <ConnectionStatus
             connection={shiftLight.connection}

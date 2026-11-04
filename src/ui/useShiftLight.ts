@@ -8,6 +8,8 @@ import { ShiftLight } from '../core/shiftLight';
 import type { Transport } from '../core/transport';
 import { MockTransport } from '../transports/mock';
 import { SimulatedCar } from '../transports/simulatedCar';
+import { TcpTransport } from '../transports/tcp';
+import { createNativeSocket } from '../transports/tcpNative';
 
 export type ConnectionKind = 'mock' | 'tcp' | 'ble';
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'lost' | 'failed';
@@ -29,6 +31,35 @@ interface Pipeline {
 
 function message(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+const TCP_HINT =
+  'Is the emulator running with "elm -n 35000 -i 0.0.0.0", on the same Wi-Fi, ' +
+  'and is Local Network access allowed for this app (Settings → Privacy)?';
+
+/** Build the transport for a connection kind, or explain why it can't be built. */
+function createTransport(
+  kind: ConnectionKind,
+  settings: Settings,
+): { transport: Transport; label: string } | { error: string } {
+  switch (kind) {
+    case 'mock': {
+      // Let the mock driver shift a bit above the threshold, so it is always crossed.
+      const car = new SimulatedCar({
+        scenario: 'pull',
+        shiftRpm: Math.min(settings.thresholdRpm + 400, 6700),
+      });
+      return { transport: new MockTransport({ car }), label: 'the simulated car' };
+    }
+    case 'tcp':
+      if (settings.tcpHost === '') return { error: "Enter the emulator's IP address" };
+      return {
+        transport: new TcpTransport(settings.tcpHost, settings.tcpPort, createNativeSocket),
+        label: `${settings.tcpHost}:${settings.tcpPort}`,
+      };
+    case 'ble':
+      return { error: 'BLE is not available yet' };
+  }
 }
 
 /**
@@ -99,23 +130,19 @@ export function useShiftLight(settings: Settings) {
   const connect = useCallback(
     async (kind: ConnectionKind) => {
       if (pipeline.current) return;
-      if (kind !== 'mock') {
+      const created = createTransport(kind, settingsRef.current);
+      if ('error' in created) {
         setConnection('failed');
-        setError(`${kind.toUpperCase()} is not available yet`);
+        setError(created.error);
         return;
       }
 
       const myAttempt = ++attempt.current;
       setConnection('connecting');
       setError(null);
-      debugLog.add('info', 'Connecting to the simulated car');
+      debugLog.add('info', `Connecting to ${created.label}`);
 
-      // Let the mock driver shift a bit above the threshold, so it is always crossed.
-      const car = new SimulatedCar({
-        scenario: 'pull',
-        shiftRpm: Math.min(settingsRef.current.thresholdRpm + 400, 6700),
-      });
-      const transport = new MockTransport({ car });
+      const { transport } = created;
       const elm = new Elm327(transport, debugLog);
 
       try {
@@ -128,7 +155,7 @@ export function useShiftLight(settings: Settings) {
         if (myAttempt !== attempt.current) return;
         debugLog.add('error', `Connect failed: ${message(err)}`);
         setConnection('failed');
-        setError(message(err));
+        setError(kind === 'tcp' ? `${message(err)}\n${TCP_HINT}` : message(err));
         return;
       }
 

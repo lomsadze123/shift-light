@@ -1,12 +1,14 @@
 import { memo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import type { Settings } from '../core/settings';
+import { TcpSettings } from './TcpSettings';
 import { colors, spacing } from './theme';
 import type { ConnectionKind, ConnectionState } from './useShiftLight';
 
 const OPTIONS: { kind: ConnectionKind; label: string; available: boolean; note?: string }[] = [
   { kind: 'mock', label: 'Mock', available: true },
-  { kind: 'tcp', label: 'TCP', available: false, note: 'Phase 6' },
+  { kind: 'tcp', label: 'TCP', available: true, note: 'emulator' },
   { kind: 'ble', label: 'BLE', available: false, note: 'Phase 7' },
 ];
 
@@ -14,12 +16,16 @@ interface Props {
   connection: ConnectionState;
   onConnect: (kind: ConnectionKind) => void;
   onDisconnect: () => void;
+  settings: Settings;
+  onSettingsChange: (changes: Partial<Settings>) => void;
 }
 
 export const ConnectionPicker = memo(function ConnectionPicker({
   connection,
   onConnect,
   onDisconnect,
+  settings,
+  onSettingsChange,
 }: Props) {
   const [kind, setKind] = useState<ConnectionKind>('mock');
   const busy = connection === 'connecting' || connection === 'connected';
@@ -47,6 +53,14 @@ export const ConnectionPicker = memo(function ConnectionPicker({
           );
         })}
       </View>
+      {kind === 'tcp' && (
+        <TcpSettings
+          host={settings.tcpHost}
+          port={settings.tcpPort}
+          onChange={onSettingsChange}
+          disabled={busy}
+        />
+      )}
       <Pressable
         accessibilityRole="button"
         onPress={() => (busy ? onDisconnect() : onConnect(kind))}
