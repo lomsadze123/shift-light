@@ -15,6 +15,7 @@ The full phased plan, architecture and technical background are in **PLAN.md**. 
   2. Summarize what you did and why.
   3. Tell me exactly what I need to verify manually (the phase's "Done when").
   4. **Then stop and wait for me.**
+- **Never commit (or push) on your own.** Leave changes uncommitted so I can review the diff first. Commit only when I explicitly say so, even if PLAN.md mentions a commit.
 - Do not start the next phase or add features outside the current phase without asking.
 - I want to understand how everything works. Briefly explain new concepts and key decisions as you go.
 - Steps marked "(You)" in PLAN.md are mine. Tell me when it is my turn and what to do.
